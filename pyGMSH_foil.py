@@ -471,8 +471,9 @@ def run_gmsh(surf1,surf2,isSharp,inputs):
     
     # Create the relevant Gmsh data structures from Gmsh model.
     gmsh.model.geo.synchronize()
-    
-    gmsh.option.setNumber("Mesh.Smoothing", 5)
+
+    # smoothing is turned off as this impacts cells adjacent to TFI boundaries
+    #gmsh.option.setNumber("Mesh.Smoothing", 5) 
     
     # Generate mesh:
     gmsh.model.mesh.generate()
