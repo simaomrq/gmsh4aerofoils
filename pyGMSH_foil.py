@@ -355,7 +355,8 @@ def run_gmsh(surf1,surf2,isSharp,inputs):
     
     gmsh.model.geo.synchronize()
     
-    
+    gmsh.model.geo.mesh.TransfiniteTri=1;
+    #gmsh.option.setNumber("Mesh.Smoothing", 2)
     if isSharp: 
         gmsh.model.geo.addPlaneSurface([4001], 5001)
         gmsh.model.geo.addPlaneSurface([4002], 5002)
@@ -434,22 +435,22 @@ def run_gmsh(surf1,surf2,isSharp,inputs):
 
     gmsh.model.mesh.field.add("Threshold", 3) 
     gmsh.model.mesh.field.setNumber(3, "InField", 1) 
-    gmsh.model.mesh.field.setNumber(3, "SizeMin", 0.5*lc) 
+    gmsh.model.mesh.field.setNumber(3, "SizeMin", 1.5*lc) 
     gmsh.model.mesh.field.setNumber(3, "SizeMax", radius/3.33) 
-    gmsh.model.mesh.field.setNumber(3, "DistMin", 0.075) 
+    gmsh.model.mesh.field.setNumber(3, "DistMin", 0.13) 
     gmsh.model.mesh.field.setNumber(3, "DistMax", radius)
     #gmsh.model.mesh.field.setAsBackgroundMesh(2)
 
     gmsh.model.mesh.field.add("Threshold", 4) 
     gmsh.model.mesh.field.setNumber(4, "InField", 2) 
-    gmsh.model.mesh.field.setNumber(4, "SizeMin", .5*lc) 
+    gmsh.model.mesh.field.setNumber(4, "SizeMin", 4.5*lc) 
     gmsh.model.mesh.field.setNumber(4, "SizeMax", radius/3.33) 
-    gmsh.model.mesh.field.setNumber(4, "DistMin", 0.125) 
+    gmsh.model.mesh.field.setNumber(4, "DistMin", 0.35) 
     gmsh.model.mesh.field.setNumber(4, "DistMax", radius)
 
     gmsh.model.mesh.field.add("Threshold", 5)
     gmsh.model.mesh.field.setNumber(5, "InField", 1) 
-    gmsh.model.mesh.field.setNumber(5, "SizeMin", 2*lc) 
+    gmsh.model.mesh.field.setNumber(5, "SizeMin", 8*lc) 
     gmsh.model.mesh.field.setNumber(5, "SizeMax", radius/3.33) 
     gmsh.model.mesh.field.setNumber(5, "DistMin", 0.75) 
     gmsh.model.mesh.field.setNumber(5, "DistMax", radius)
@@ -471,9 +472,8 @@ def run_gmsh(surf1,surf2,isSharp,inputs):
     
     # Create the relevant Gmsh data structures from Gmsh model.
     gmsh.model.geo.synchronize()
-
-    # smoothing is turned off as this impacts cells adjacent to TFI boundaries
-    #gmsh.option.setNumber("Mesh.Smoothing", 5) 
+    
+    gmsh.model.geo.mesh.TransfiniteTri=1;
     
     # Generate mesh:
     gmsh.model.mesh.generate()
@@ -514,48 +514,174 @@ def get_aerofoil_coordinates(inFile,plotOption = False):
         ipt     = 0;
         xmin    = 9999.9    #   location of leading points
         xmax    = -9999.9    #   location of leading points
-        xstag   = 9999.9    #   location of stagnation point
-
+        iXmin   = ipt
+        # ymax    = -9999.9
+        # ymin    = 9999.
+        # xstag   = 9999.9    #   location of stagnation point
+        dx = dy = 0
         for row in reader:
             line = []
-            [line.append(x) for x in row if len(x) > 1]
-            rows[ipt,0] = float(line[0])
-            rows[ipt,1] = float(line[1])
+            [line.append(x) for x in row if len(x) >= 1]
 
-            ## find leading edge
-            if rows[ipt,0] <= xmin: 
-                xmin    = rows[ipt,0]
-                iXmin   = ipt;
+            x = float(line[0])
+            y = float(line[1])
             
-            ## find trailing edge
-            if rows[ipt,0] >= xmax:
-                xmax    = rows[ipt,0]
-                iXmax   = ipt
+            if ipt > 0: 
+                dx = x - rows[ipt-1,0]
+                dy = y - rows[ipt-1,0]
 
-            ipt += 1
+            # avoiding duplicates
+            if( dx*dx + dy*dy > 1e-9 or ipt < 1): 
+                rows[ipt,0] = x
+                rows[ipt,1] = y
 
+                ## find leading edge
+                if rows[ipt,0] <= xmin:
+                    norms   = np.linalg.norm(rows[ipt,:]-rows[iXmin,:])
+                    iXmin2  = None
+                    if norms < 1.e-12: iXmin2 = iXmin
+                    xmin    = rows[ipt,0]
+                    iXmin   = ipt;
+                
+                ## find trailing edge
+                if rows[ipt,0] >= xmax:
+                    xmax    = rows[ipt,0]
+                    iXmax   = ipt
+                
+                ipt += 1
+                
     rows        = rows[0:ipt,:]
-    
+        
     #normalizing aerofoil and setting l.e. @ (0,0)
     rows[:,0]   = rows[:,0] - min(rows[:,0])
+    rows[:,1]   = rows[:,1] - rows[np.argmin(rows[:,0]),1]
     rows[:,1]   = rows[:,1]/max(rows[:,0])
     rows[:,0]   = rows[:,0]/max(rows[:,0])
+
+    print('foil coordinates:\n')
+    for i,x in enumerate(rows):
+        print(i,x)
     
-    if iXmin != 0 and np.abs(rows[iXmin,0] - rows[0,0]) < 1e-12:
-        data_1   = rows[0:iXmin,:]
-        data_2   = rows[iXmin:,:]    
-    elif iXmin == 0:
-        if iXmax < ipt-1:
-            data_1   = rows[0:iXmax+1,:]
-            data_2   = rows[iXmax+1:,:]
-    elif iXmax == 0:
-        data_1   = rows[0:iXmin+1,:]
-        data_2   = rows[iXmin:,:]
+    # check if blunt te
+    print(iXmax, len(rows)-1,rows[iXmax,:])
+    if iXmax == 0:
+        dummy = rows[iXmax+1:,:]
+        iXmax2 = np.argmax(dummy[:,0])
+        iXmax3 = iXmax2 + 1
+    elif iXmax == len(rows)-1:
+        dummy = rows[0:iXmax,:] 
+        iXmax2 = np.argmax(dummy[:,0])
+        iXmax3 = iXmax2
     else:
-        data_1   = rows[0:iXmin+1,:]
-        data_2   = rows[iXmin:,:]
+        dummy = rows[0:iXmax,:]
+        dummy = np.concatenate((dummy, rows[iXmax+1:,:]), axis=0)
+        iXmax2 = np.argmax(dummy[:,0])
+        if iXmax2 < iXmax:
+            iXmax3 = iXmax2
+        else:
+            iXmax3 = iXmax2 + 1
+
     
+    x1 = rows[iXmax,:]
+    x2 = dummy[iXmax2,:]
+    x1 = x2 - x1
+    x2 = np.array([1,0])
+    if np.linalg.norm(x1) < 1e-6:
+        isBlunt = False
+    else:
+        th=np.arccos(np.dot(x1.T,x2)/(np.linalg.norm(x1)*np.linalg.norm(x2)))
+        isBlunt = False
+        if np.abs(np.pi*0.5-th) < 0.25*np.pi: isBlunt = True
+    if isBlunt:
+        print('Blunt trainling edge found')
+        print('\nTE: ',rows[iXmax,:],'\n',rows[iXmax3,:])
+        if iXmin2 == None: iXmin2 = iXmin
+        print('\nLE: ',iXmin,iXmin2,rows[iXmin,:],'\n',rows[iXmin2,:])
+    else:
+        print('Sharp trainling edge found')
+        print('\nTE: ',rows[iXmax,:])
+        assert(iXmax != iXmax3)
+
+        if iXmin2 == None: iXmin2 = iXmin
+        print('\nLE: ',iXmin,iXmin2,rows[iXmin,:],'\n',rows[iXmin2,:])
+
+    if(iXmin == 0 or iXmin2 == 0): 
+        print('le at index = 0')
+        if iXmin2 < iXmin:
+            temp    = iXmin
+            iXmin   = iXmin2
+            iXmin2  = temp
+        i = 1
+        dx = rows[1,0] - rows[iXmin,0]
+        while dx > 0:
+            ite = i
+            i   +=1
+            dx = rows[i,0] - rows[i-1,0]
+
+        if ite == iXmax:
+            ind1 = np.argsort(rows[iXmin:ite+1,0])
+            ind2 = np.argsort(rows[iXmin2:iXmax3+1,0])
+            print('surf1:',iXmin,ite)
+            print('surf2:',iXmin2,iXmax3)
+        elif ite == iXmax3:
+            data_1  = rows[iXmin:iXmax3+1,:]
+            data_2  = rows[iXmin2:iXmax+1,:]
+            data_1  = data_1[data_1[:,0].argsort()]
+            data_2  = data_2[data_2[:,0].argsort()]
+            #ind1 = np.argsort(rows[iXmin:iXmax3+1,0])
+            #ind2 = np.argsort(rows[iXmin2:iXmax+1,0])
+            print('surf1:',iXmin,iXmax3)
+            print('surf2:',iXmin2,iXmax)
+        
+        print('data1:\n',data_1)
+        print('data2:\n',data_2)
+    elif(iXmin == len(rows)): 
+        print('0le at index = ',len(rows))
+    else: 
+        print('1le at index = ',iXmin,rows[iXmin,:],rows[0,:])
+        print('1te at index = ',iXmax,len(rows),rows[iXmax,:],rows[128,:])
+        #trailing edge at (0,0)
+        if iXmax == 0 or iXmax == len(rows)-1:            
+            ind1 = np.argsort(rows[0:iXmin+1,0])
+            ind2 = np.argsort(rows[iXmin:len(rows),0])
+            print('indices: ',ind1,ind2)
+            data_1 = rows[ind1,:]
+            data_2 = rows[iXmin+ind2,:]
+
+    
+    #print(rows[0,0],rows[0,1])
+    #print(rows[iXmin,0],rows[iXmin,1])
+    #print(iXmin)
+    #print(rows[iXmin,0] - rows[0,0])
+    #if iXmin != 0 and np.abs(rows[iXmin,0] - rows[0,0]) < 1e-12:
+        #print('here0')
+        #data_1   = rows[0:iXmin,:]
+        #data_2   = rows[iXmin:,:]    
+    #elif iXmin == 0:
+        #print('here1')
+        #if iXmax < ipt-1:
+            #print('here2')
+            #data_1   = rows[0:iXmax+1,:]
+            #data_2   = rows[iXmax+1:,:]
+    #elif iXmax == 0:
+        #print('here3')
+        #data_1   = rows[0:iXmin+1,:]
+        #data_2   = rows[iXmin:,:]
+    #else:
+        #print('here4')
+        #ind      = np.argsort(rows[0:iXmin+1,0])
+        #data_1   = rows[0:iXmin+1,:]
+        #data_2   = rows[iXmin:,:]
+    #print('\ndata1:\n',data_1)
+    #print('\ndata2:\n',data_2)
+    #phi = np.linspace(0, 2.*np.pi, 40)
+    #r = 0.5 + np.cos(phi)         # polar coords
+    #x, y = r * np.cos(phi), r * np.sin(phi)
+    #tck, u = interpolate.splprep([x, y], s=0)
     splprep1, fp, ier, msg   = interpolate.splprep([data_1[:,0], data_1[:,1]], u=None, k=5, s=1e-9, per=0, full_output=1)
+    # print('\nd1',[data_1[:,0], data_1[:,1]])
+    # print('\nd2',[data_2[:,0], data_2[:,1]])
+    # sys.exit()
     splprep2, fp, ier, msg   = interpolate.splprep([data_2[:,0], data_2[:,1]], u=None, k=5, s=1e-9, per=0, full_output=1)
 
     x1,y1 =  interpolate_foil_coordinates(splprep1,du1=1.e-3,du2=1.e-3,resolution=199,N=99,D=20)
@@ -609,7 +735,9 @@ def main():
     parser.add_argument('foilPath', type=str,help='path to coordinate file')
     
     # Optional argument
-    parser.add_argument('--plot', type=str,default=False,help='plot aerofoil and splining')
+    parser.add_argument('--plot', action='store_true', default=False, help='Plot the foil coordinates')
+    #parser.add_argument('--plot', type=str,default=False,help='plot aerofoil and splining')
+
 
     args = parser.parse_args()
     print("Argument values:")
@@ -617,16 +745,16 @@ def main():
     X1,X2,teFlag = get_aerofoil_coordinates(args.foilPath,args.plot)
     
     parameters = {
-        "n_points_foil_1": 129,             # n. of points in first half of aerofoil | te -> midpoint -> le
-        "n_points_foil_2": 135,             # n. of points in second half of aerofoil
+        "n_points_foil_1": 65,             # n. of points in first half of aerofoil | te -> midpoint -> le
+        "n_points_foil_2": 95,             # n. of points in second half of aerofoil
         "n_points_bl": 29,                  # trailing edge to max. thickness location
         "n_points_te": 29,                  # t.e.
-        "n_points_wake": 65,                # n of points in wake
-        "radius": 25,                       # distance to farfield
-        "blProgRate": 1.5,                  # progression rate for b.l. thickness
+        "n_points_wake": 15,                # n of points in wake
+        "radius": 100,                       # distance to farfield
+        "blProgRate": 1.2,                  # progression rate for b.l. thickness
         "surfaceProgRate": 1.01,            # chordwise progression rate on surface
         "blThick_trailingEdge": 0.015,      # b.l. thickness region size;
-        "blThick_leadingingEdge": 0.006     # b.l. thickness region size;
+        "blThick_leadingingEdge": 0.005     # b.l. thickness region size;
     }    
     
     run_gmsh(X1,X2,teFlag,parameters)
